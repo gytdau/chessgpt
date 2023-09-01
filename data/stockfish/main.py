@@ -6,8 +6,9 @@ import shutil
 import chess.engine
 import chess.polyglot
 import chess.svg
+import tqdm
 
-output_root = "../output"
+output_root = "./"
 
 
 def save_match(filename, board, moves):
@@ -41,22 +42,17 @@ def play(engine: chess.engine.SimpleEngine):
     save_match(filename, board, moves)
 
 
-def setup_output(output_dir):
-    if os.path.isdir(output_dir):
-        shutil.rmtree(output_dir)
-
-    os.makedirs(f"{output_dir}")
-
-
 def simulate():
-    setup_output(output_root)
-
     STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
     engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
     engine.configure({"Threads": 6})
     engine.configure({"Hash": 4096})
 
-    for _ in range(10):
+    # delete log file
+    if os.path.exists(f"{output_root}/log.log"):
+        os.remove(f"{output_root}/log.log")
+
+    for _ in tqdm.tqdm(range(1000)):
         play(
             engine,
         )
