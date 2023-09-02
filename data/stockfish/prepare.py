@@ -9,12 +9,9 @@ stoi = {
 }
 
 # Add spaces and promotion mappings
-stoi[" "] = len(stoi)
-stoi["q"] = len(stoi) + 1
-stoi["r"] = len(stoi) + 2
-stoi["b"] = len(stoi) + 3
-stoi["n"] = len(stoi) + 4
-stoi["\n"] = len(stoi) + 5
+new_tokens = [" ", "q", "r", "b", "n", "\n"]
+for token in new_tokens:
+    stoi[token] = len(stoi)
 
 vocab_size = len(stoi.items())
 
