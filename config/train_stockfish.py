@@ -1,5 +1,6 @@
 # train a miniature character-level shakespeare model
 # good for debugging and playing on macbooks and such
+import datetime
 
 out_dir = "out-stockfish"
 eval_interval = 250  # keep frequent because we'll overfit
@@ -10,7 +11,7 @@ log_interval = 10  # don't print too too often
 always_save_checkpoint = False
 
 wandb_project = "stockfish"
-wandb_run_name = "mini-gpt"
+wandb_run_name = "mini-gpt" + datetime.datetime.now().strftime("-%Y-%m-%d-%H-%M-%S")
 
 dataset = "stockfish"
 gradient_accumulation_steps = 1
@@ -30,3 +31,5 @@ min_lr = 1e-4  # learning_rate / 10 usually
 beta2 = 0.99  # make a bit bigger because number of tokens per iter is small
 
 warmup_iters = 100  # not super necessary potentially
+
+wandb_log = True
