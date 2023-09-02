@@ -8,28 +8,30 @@ import chess.polyglot
 import chess.svg
 import tqdm
 import random
+from multiprocessing import Pool, Lock, Value, current_process
 
 output_root = "./"
+STOCKFISH_PATH = "/home/ubuntu/stockfish/src/stockfish"
+
+
+def init(l):
+    global lock
+    lock = l
+    global engine
+    engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+    engine.configure({"Threads": 1})
+    engine.configure({"Hash": 4096})
 
 
 def save_match(filename, board, moves):
-    with open(f"{filename}.log", "a") as game_file:
-        # game_file.write(f"\n{str(board)}\n\n")
-
-        for i, move in enumerate(moves):
-            game_file.write(f"{str(move)} ")
-
-        game_file.write("\n")
-
-    # boardsvg = chess.svg.board(board=board)
-    # with open(f"{filename}.svg", "w") as image_file:
-    #     image_file.write(boardsvg)
+    with lock:
+        with open(f"{filename}.log", "a") as game_file:
+            game_file.write(" ".join(str(move) for move in moves) + "\n")
 
 
-def play(engine: chess.engine.SimpleEngine):
+def play(dummy_arg):  # the argument is a dummy one, required for the imap_unordered
     board = chess.Board()
     moves = []
-
 
     while not board.is_game_over():
         depth = random.choice([2, 3, 4])
@@ -37,28 +39,24 @@ def play(engine: chess.engine.SimpleEngine):
         board.push(result.move)
         moves.append(result.move)
 
-    # random number
     filename = f"{output_root}/log"
-
     save_match(filename, board, moves)
+
+    return 1  # just return 1 for every game completed
 
 
 def simulate():
-    STOCKFISH_PATH = "/home/ubuntu/stockfish/src/stockfish"
-    engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
-    engine.configure({"Threads": 6})
-    engine.configure({"Hash": 4096})
+    l = Lock()
+    num_processes = os.cpu_count() - 1
+    pool = Pool(processes=num_processes, initializer=init, initargs=(l,))
 
-    # delete log file
-    if os.path.exists(f"{output_root}/log.log"):
-        os.remove(f"{output_root}/log.log")
+    total_games = 10000
+    with tqdm.tqdm(total=total_games) as pbar:
+        for _ in pool.imap_unordered(play, [None] * total_games):  # passing dummy values
+            pbar.update()
 
-    for _ in tqdm.tqdm(range(1000)):
-        play(
-            engine,
-        )
-
-    engine.quit()
+    pool.close()
+    pool.join()
 
 
 if __name__ == "__main__":
