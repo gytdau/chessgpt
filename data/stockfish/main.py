@@ -7,6 +7,7 @@ import chess.engine
 import chess.polyglot
 import chess.svg
 import tqdm
+import random
 
 output_root = "./"
 
@@ -29,9 +30,9 @@ def play(engine: chess.engine.SimpleEngine):
     board = chess.Board()
     moves = []
 
-    depth = 2
 
     while not board.is_game_over():
+        depth = random.choice([2, 3, 4])
         result = engine.play(board, chess.engine.Limit(depth=depth), ponder=False)
         board.push(result.move)
         moves.append(result.move)
@@ -43,7 +44,7 @@ def play(engine: chess.engine.SimpleEngine):
 
 
 def simulate():
-    STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
+    STOCKFISH_PATH = "/home/ubuntu/stockfish/src/stockfish"
     engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
     engine.configure({"Threads": 6})
     engine.configure({"Hash": 4096})
