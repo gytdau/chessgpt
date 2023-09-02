@@ -9,7 +9,6 @@ log_interval = 10  # don't print too too often
 # we expect to overfit on this small dataset, so only save when val improves
 always_save_checkpoint = False
 
-wandb_log = False  # override via command line if you like
 wandb_project = "stockfish"
 wandb_run_name = "mini-gpt"
 
@@ -31,6 +30,3 @@ min_lr = 1e-4  # learning_rate / 10 usually
 beta2 = 0.99  # make a bit bigger because number of tokens per iter is small
 
 warmup_iters = 100  # not super necessary potentially
-
-device = "mps"  # run on mac silicon only
-compile = False  # do not torch compile the model

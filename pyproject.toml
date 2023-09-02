@@ -12,6 +12,7 @@ tqdm = "^4.66.1"
 numpy = "^1.25.2"
 torch = "2.0.0"
 tiktoken = "^0.4.0"
+wandb = "^0.15.9"
 
 
 [build-system]
