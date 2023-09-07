@@ -49,7 +49,8 @@ import wandb
 
 torch.manual_seed(1337)
 
-embedding_dimensions = 32
+embedding_dimensions = 64
+n_head = 4
 
 
 class MaskedAttention(nn.Module):
@@ -63,6 +64,8 @@ class MaskedAttention(nn.Module):
             embedding_dimensions, 3 * embedding_dimensions
         )
 
+        self.output_projection = nn.Linear(embedding_dimensions, embedding_dimensions)
+
         self.register_buffer("mask", torch.tril(torch.ones(block_size, block_size)))
 
     def forward(self, x):
@@ -73,13 +76,29 @@ class MaskedAttention(nn.Module):
             embedding_dimensions, dim=-1
         )  # (B, T, C)
 
+        keys = keys.view(
+            -1, block_size, n_head, embedding_dimensions // n_head
+        ).transpose(
+            1, 2
+        )  # (B, n_head, T, C // n_head)
+        queries = queries.view(
+            -1, block_size, n_head, embedding_dimensions // n_head
+        ).transpose(
+            1, 2
+        )  # (B, n_head, T, C // n_head)
+        values = values.view(
+            -1, block_size, n_head, embedding_dimensions // n_head
+        ).transpose(
+            1, 2
+        )  # (B, n_head, T, C // n_head)
+
         # keys = keys.transpose(1, 2)  # (B, C, T)
         # queries = queries.transpose(1, 2)  # (B, C, T)
         # values = values.transpose(1, 2)  # (B, C, T)
 
         # Compute the self-attention
-        # (B, T, C) x (B, C, T) -> (B, T, T)
-        logits = torch.bmm(queries, keys.transpose(1, 2))
+        # (B, n_head, T, C // n_head) x (B, n_head, C // n_head, T) -> (B, n_head, T, T)
+        logits = queries @ keys.transpose(2, 3)
         mystery = 1.0 / math.sqrt(keys.size(-1))  # is this a regularisation loss?
         logits = logits * mystery
 
@@ -90,7 +109,15 @@ class MaskedAttention(nn.Module):
         # Turn the scores into probabilities
         probs = F.softmax(logits, dim=-1)
 
-        y = torch.bmm(probs, values)  # (B, T, C)
+        y = (
+            probs @ values
+        )  # (B, n_head, T, T) x (B, n_head, T, C // n_head) -> (B, n_head, T, C // n_head)
+
+        y = y.transpose(1, 2).contiguous()  # (B, T, n_head, C // n_head)
+        y = y.view(-1, block_size, embedding_dimensions)  # (B, T, C)
+
+        # output projection does not seem to help
+        # y = self.output_projection(y)
 
         return y
 
@@ -98,12 +125,23 @@ class MaskedAttention(nn.Module):
 class Block(nn.Module):
     def __init__(self):
         super().__init__()
+
         self.attention = MaskedAttention()
         self.layer_norm = nn.LayerNorm(embedding_dimensions)
 
+        self.mlp = nn.Sequential(
+            nn.Linear(embedding_dimensions, 4 * embedding_dimensions),
+            nn.GELU(),
+            nn.Linear(4 * embedding_dimensions, embedding_dimensions),
+        )
+        self.layer_norm_2 = nn.LayerNorm(embedding_dimensions)
+
     def forward(self, x):
         y = self.attention(self.layer_norm(x))
-        return x + y
+        x = x + y
+        y = self.mlp(self.layer_norm_2(x))
+        x = x + y
+        return x
 
 
 class BigramLanguageModel(nn.Module):
@@ -168,10 +206,11 @@ model.to("cuda")
 
 def sample():
     start = torch.zeros(1, block_size, dtype=torch.long, device="cuda")
-    out = model.generate(start, 20).to("cpu")
+    out = model.generate(start, 50).to("cpu")
     out = out[0].tolist()
     # print(decode(torch.argmax(out, dim=1)))
-    print(decode(out))
+    print("---")
+    print(decode(out[block_size:]))
 
 
 sample()
