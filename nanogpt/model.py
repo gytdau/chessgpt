@@ -22,8 +22,10 @@ dataset = torch.tensor(encode(dataset), dtype=torch.long)
 # 10% of the dataset is used for validation
 val_size = int(len(dataset) * 0.1)
 train_dataset, val_dataset = dataset[:-val_size], dataset[-val_size:]
+train_dataset = train_dataset.to("cuda")
+val_dataset = val_dataset.to("cuda")
 
-batch_size = 4  # how many independent sequences will we process in parallel?
+batch_size = 64  # how many independent sequences will we process in parallel?
 block_size = 8  # what is the maximum context length for predictions?
 
 
@@ -34,9 +36,6 @@ def get_batch(split):
     x = torch.stack([data[i : i + block_size] for i in ix])
     y = torch.stack([data[i + 1 : i + block_size + 1] for i in ix])
     return x, y
-
-
-print(get_batch("train"))
 
 
 # %%
@@ -53,25 +52,35 @@ torch.manual_seed(1337)
 embedding_dimensions = 32
 
 
-class MaskedMultiheadAttention(nn.Module):
+class MaskedAttention(nn.Module):
     def __init__(self):
         super().__init__()
-        self.keys = nn.Linear(embedding_dimensions, embedding_dimensions)
-        self.queries = nn.Linear(embedding_dimensions, embedding_dimensions)
-        self.values = nn.Linear(embedding_dimensions, embedding_dimensions)
+        # self.keys = nn.Linear(embedding_dimensions, embedding_dimensions)
+        # self.queries = nn.Linear(embedding_dimensions, embedding_dimensions)
+        # self.values = nn.Linear(embedding_dimensions, embedding_dimensions)
+
+        self.keys_queries_and_values = nn.Linear(
+            embedding_dimensions, 3 * embedding_dimensions
+        )
 
         self.register_buffer("mask", torch.tril(torch.ones(block_size, block_size)))
 
     def forward(self, x):
-        # x is shaped like (B, T, C)
-        keys = self.keys(x)  # (B, T, C)
-        queries = self.queries(x)  # (B, T, C)
-        values = self.values(x)  # (B, T, C)
+        # unpack:
+        embedded = self.keys_queries_and_values(x)  # (B, T, 3 * C)
+
+        keys, queries, values = embedded.split(
+            embedding_dimensions, dim=-1
+        )  # (B, T, C)
+
+        # keys = keys.transpose(1, 2)  # (B, C, T)
+        # queries = queries.transpose(1, 2)  # (B, C, T)
+        # values = values.transpose(1, 2)  # (B, C, T)
 
         # Compute the self-attention
         # (B, T, C) x (B, C, T) -> (B, T, T)
         logits = torch.bmm(queries, keys.transpose(1, 2))
-        mystery = 1.0 / math.sqrt(keys.size(-1))
+        mystery = 1.0 / math.sqrt(keys.size(-1))  # is this a regularisation loss?
         logits = logits * mystery
 
         # Mask out the lower half of the scores, so we can't look into the future
@@ -86,6 +95,17 @@ class MaskedMultiheadAttention(nn.Module):
         return y
 
 
+class Block(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.attention = MaskedAttention()
+        self.layer_norm = nn.LayerNorm(embedding_dimensions)
+
+    def forward(self, x):
+        y = self.attention(self.layer_norm(x))
+        return x + y
+
+
 class BigramLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -93,8 +113,10 @@ class BigramLanguageModel(nn.Module):
         self.position_embedding_table = nn.Embedding(block_size, embedding_dimensions)
         self.language_modelling_head = nn.Linear(embedding_dimensions, vocab_size)
 
-        self.transformer = nn.Sequential(
-            MaskedMultiheadAttention(),
+        self.transformer = nn.ModuleDict(
+            {
+                "h": nn.ModuleList([Block() for _ in range(8)]),
+            }
         )
 
     def forward(self, idx, targets=None):
@@ -103,14 +125,15 @@ class BigramLanguageModel(nn.Module):
         )  # (batch, block_size, embedding_dim)
         # Surely there is a more efficient way to do this, since we are taking the entire position embedding table:
         position_embeddings = self.position_embedding_table(
-            torch.arange(block_size)
+            torch.arange(block_size).to(idx.device)
         )  # (block_size, embedding_dim)
 
         # Add the position embeddings to the token embeddings
         x = token_embeddings + position_embeddings  # (batch, block_size, embedding_dim)
 
         # Pass through the model
-        x = self.transformer(x)
+        for block in self.transformer.h:
+            x = block(x)
 
         logits = self.language_modelling_head(x)  # (batch, block_size, vocab_size)
 
@@ -140,13 +163,12 @@ class BigramLanguageModel(nn.Module):
 
 
 model = BigramLanguageModel()
-
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+model.to("cuda")
 
 
 def sample():
-    start = torch.zeros(1, block_size, dtype=torch.long)
-    out = model.generate(start, 20)
+    start = torch.zeros(1, block_size, dtype=torch.long, device="cuda")
+    out = model.generate(start, 20).to("cpu")
     out = out[0].tolist()
     # print(decode(torch.argmax(out, dim=1)))
     print(decode(out))
@@ -179,15 +201,18 @@ def estimate_loss(steps, times_per_step):
         {
             "train_loss": train_loss,
             "val_loss": val_loss,
-            "steps": steps,
             "time_per_step": time_per_step_us,
-        }
+        },
+        step=steps,
     )
 
 
 times_per_step = []
 
 wandb.init(project="nanogpt")
+wandb.watch(model)
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
 for steps in range(100000):
     start = time.time()
@@ -203,7 +228,7 @@ for steps in range(100000):
     times_per_step.append(end - start)
     times_per_step = times_per_step[-100:]
 
-    if steps % 10000 == 0:
+    if steps % 1000 == 0:
         estimate_loss(steps, times_per_step)
         sample()
 
