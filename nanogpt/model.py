@@ -25,7 +25,7 @@ train_dataset, val_dataset = dataset[:-val_size], dataset[-val_size:]
 train_dataset = train_dataset.to("cuda")
 val_dataset = val_dataset.to("cuda")
 
-batch_size = 64  # how many independent sequences will we process in parallel?
+batch_size = 256  # how many independent sequences will we process in parallel?
 block_size = 8  # what is the maximum context length for predictions?
 
 
@@ -51,6 +51,7 @@ torch.manual_seed(1337)
 
 embedding_dimensions = 64
 n_head = 4
+dropout = 0.2
 
 
 class MaskedAttention(nn.Module):
@@ -65,6 +66,9 @@ class MaskedAttention(nn.Module):
         )
 
         self.output_projection = nn.Linear(embedding_dimensions, embedding_dimensions)
+
+        self.attn_dropout = nn.Dropout(dropout)
+        self.resid_dropout = nn.Dropout(dropout)
 
         self.register_buffer("mask", torch.tril(torch.ones(block_size, block_size)))
 
@@ -109,12 +113,16 @@ class MaskedAttention(nn.Module):
         # Turn the scores into probabilities
         probs = F.softmax(logits, dim=-1)
 
+        # probs = self.attn_dropout(probs)
+
         y = (
             probs @ values
         )  # (B, n_head, T, T) x (B, n_head, T, C // n_head) -> (B, n_head, T, C // n_head)
 
         y = y.transpose(1, 2).contiguous()  # (B, T, n_head, C // n_head)
         y = y.view(-1, block_size, embedding_dimensions)  # (B, T, C)
+
+        # y = self.resid_dropout(y)
 
         # output projection does not seem to help
         # y = self.output_projection(y)
